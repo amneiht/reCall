@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include "help.h"
 
-struct sipsess *sess;
+struct sipsess *sess = NULL;
 asip_stream_t* asip_initStream();
 static const pa_sample_spec sample = { .format = PA_SAMPLE_S16LE, .rate = 8000,
 		.channels = 1 };
@@ -22,7 +22,8 @@ void connect_handler(const struct sip_msg *msg, void *arg) {
 	call_accept *cp = arg;
 	asip_conf_t *con = cp->con;
 	int err;
-	if (sess) {
+	if (sess != NULL)
+	{
 		/* Already in a call */
 		(void) sip_treply(NULL, con->sip, msg, 486, "Busy Here");
 		return;
@@ -45,8 +46,9 @@ void connect_handler(const struct sip_msg *msg, void *arg) {
 	call_info *callf = malloc(sizeof(call_info));
 	callf->con = con;
 	callf->st = stream;
-	err = sipsess_accept(&sess, con->sock, msg, 200, "OK", ua->name,
-			"application/sdp", mb, auth_handler, ua, false, sipCall_offer,
+	log_info("invete mes : /n %s",msg->mb->buf);
+	err = sipsess_accept(&sess, con->sock, msg, 200, "ok", ua->name,
+			"application/sdp", NULL, auth_handler, ua,false, sipCall_offer,
 			sipCall_answer, sipCall_entab, sipCall_info, sipCall_refer,
 			sipCall_close, callf, NULL, NULL);
 	if (err) {
@@ -92,19 +94,6 @@ int8_t ein[5000]; /// encode data array
 
 void call_rtpHandle(const struct sa *src, const struct rtp_header *hdr,
 		struct mbuf *mb, void *arg) {
-//	log_info("pt is %d", hdr->pt);
-	static int dls = 0;
-	if (dls < 4) {
-		log_info("buff size is %ld", mb->size);
-		log_info("rtp payload is %d", hdr->pt);
-		log_info("rtp header is %d", hdr->ver);
-		log_info("seq is : %d", hdr->seq);
-		log_info("ccrs is %d", hdr->cc);
-		log_info("time stamp %u", hdr->ts);
-		log_info("data is : %u",hdr->ssrc);
-		log_info();
-		dls++;
-	}
 	pa_simple *out = arg;
 	static int size = sizeof(int16_t);
 	int lg = mb->size - RTP_HEADER_SIZE; //so data trong rtp
@@ -145,6 +134,7 @@ void sipCall_progress(const struct sip_msg *msg, void *arg) {
 int sipCall_answer(const struct sip_msg *msg, void *arg) {
 
 	log_info("answer code is %d", msg->scode);
+	log_info("sip anwer_mess :\n%s", (char* )(msg->mb->buf));
 //	decode_sdp(msg->mb, __func__);
 	return 0;
 }
@@ -177,6 +167,7 @@ void sipCall_entab(const struct sip_msg *msg, void *arg) {
 	mb = msg->mb;
 	sdp_decode(callf->con->sdp, mb, true);
 	const struct sa *addr = sdp_media_raddr(callf->con->media);
+	log_info("sip mess :\n%s", (char* ) mb->buf);
 	if (addr == NULL) {
 		log_err("no remote address ");
 		return;
@@ -216,17 +207,18 @@ void* call_sendRtp(void *arg) {
 	int8_t *point = (int8_t*) &(buf->buf[RTP_HEADER_SIZE]);
 	buf->pos = RTP_HEADER_SIZE;
 	log_info("send size is %d", buf->size);
+	uint32_t ts = time_milisecond();
 	while (str->run) {
 		err = pa_simple_read(str->in, din, read, NULL);
 		if (err) {
 			log_err("loi read data");
 		} else {
-			//TODO
-
+			//TOD
 			UlawArrayEncode(din, lg, point);
 			buf->pos = RTP_HEADER_SIZE;
-			rtp_send(str->rtp, sa, false, false, 0, time_milisecond(), buf);
-//			pa_simple_write(str->out,din,read,NULL);
+			ts = ts & 0xffffffff;
+			rtp_send(str->rtp, sa, false, false, 0, ts, buf);
+			ts = ts + 20;
 		}
 	}
 	free(sa);
@@ -266,8 +258,6 @@ int asip_call(asip_conf_t *con, asip_user *ua, asip_user *call) {
 	if (err) {
 		log_err("rtp listen false \n");
 	}
-
-//	err = sdp_session_alloc(&sdp, &laddr);
 	if (err) {
 		re_fprintf(stderr, "sdp session error: %s\n", strerror(err));
 		goto out;

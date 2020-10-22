@@ -49,7 +49,7 @@ void asip_deleteConf(asip_conf_t *conf);
  * @return 0 or true , otherwise is false
  */
 int asip_initSession(asip_conf_t *conf, asip_user *ua);
-void asip_newUser(asip_user **ua, char *user, char *pass, char *proxy);
+void asip_newUser(asip_user **ua, char *user, char *pass, char *proxy ,int port );
 void asip_deleteUser(asip_user *ua);
 void asip_getUserUri(asip_user *d, char *p);
 void asip_getRegUri(asip_user *d, char *p);
