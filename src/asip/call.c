@@ -12,51 +12,12 @@
 #include <stdio.h>
 #include "help.h"
 
+extern sip_state state;
 struct sipsess *sess = NULL;
 asip_stream_t* asip_initStream();
 static const pa_sample_spec sample = { .format = PA_SAMPLE_S16LE, .rate = 8000,
 		.channels = 1 };
-void connect_handler(const struct sip_msg *msg, void *arg) {
-	//TODO
-	log_debug("sipsock connect handle");
-	call_accept *cp = arg;
-	asip_conf_t *con = cp->con;
-	int err;
-	if (sess != NULL)
-	{
-		/* Already in a call */
-		(void) sip_treply(NULL, con->sip, msg, 486, "Busy Here");
-		return;
-	}
-	bool got_offer = (mbuf_get_left(msg->mb) > 0);
-	if (got_offer) {
-		err = sdp_decode(con->sdp, msg->mb, true);
-		if (err) {
-			log_err("unable to decode SDP offer: %s\n", strerror(err));
-		}
-	}
-	struct mbuf *mb;
-	err = sdp_encode(&mb, con->sdp, !got_offer);
-	if (err) {
-		log_err("unable to encode SDP: %s\n", strerror(err));
-		goto out;
-	}
-	asip_user *ua = cp->ua;
-	asip_stream_t *stream = asip_initStream();
-	call_info *callf = malloc(sizeof(call_info));
-	callf->con = con;
-	callf->st = stream;
-	log_info("invete mes : /n %s",msg->mb->buf);
-	err = sipsess_accept(&sess, con->sock, msg, 200, "ok", ua->name,
-			"application/sdp", NULL, auth_handler, ua,false, sipCall_offer,
-			sipCall_answer, sipCall_entab, sipCall_info, sipCall_refer,
-			sipCall_close, callf, NULL, NULL);
-	if (err) {
-		log_err("can not anwser");
-	}
-	mem_deref(mb);
-	out: return;
-}
+
 void decode_sdp(struct mbuf *mb, const char *str) {
 	struct sa laddr;
 	struct sdp_session *sess;
@@ -86,6 +47,11 @@ asip_stream_t* asip_initStream() {
 		return NULL;
 	}
 //	err = rtp_listen()
+	struct sa laddr;
+	net_default_source_addr_get(AF_INET, &laddr);
+	sa_set_port(&laddr, 0);
+	rtp_listen(&(res->rtp), IPPROTO_UDP, &laddr, 10000, 30000, false,
+			call_rtpHandle, NULL, res->out);
 	return res;
 }
 int16_t dout[5000]; /// output encode data
@@ -134,7 +100,7 @@ void sipCall_progress(const struct sip_msg *msg, void *arg) {
 int sipCall_answer(const struct sip_msg *msg, void *arg) {
 
 	log_info("answer code is %d", msg->scode);
-	log_info("sip anwer_mess :\n%s", (char* )(msg->mb->buf));
+//	log_info("sip anwer_mess :\n%s", (char* )(msg->mb->buf));
 //	decode_sdp(msg->mb, __func__);
 	return 0;
 }
@@ -146,6 +112,7 @@ int sipCall_offer(struct mbuf **descp, const struct sip_msg *msg, void *arg) {
 void sipCall_close(int err, const struct sip_msg *msg, void *arg) {
 	log_info("close sip call");
 //	decode_sdp(msg->mb, __func__);
+	state.call = 0;
 	call_info *p = arg;
 	asip_stream_t *st = p->st;
 	asip_closeStream(st);
@@ -160,26 +127,38 @@ void sipCall_close(int err, const struct sip_msg *msg, void *arg) {
  * @param arg pointer to call_info structure
  */
 void sipCall_entab(const struct sip_msg *msg, void *arg) {
+	//TODO
+	state.call = 1;
 	log_info("tao ket noi");
-//	decode_sdp(msg->mb, __func__);
 	call_info *callf = arg;
-	struct mbuf *mb;
-	mb = msg->mb;
-	sdp_decode(callf->con->sdp, mb, true);
-	const struct sa *addr = sdp_media_raddr(callf->con->media);
-	log_info("sip mess :\n%s", (char* ) mb->buf);
-	if (addr == NULL) {
-		log_err("no remote address ");
-		return;
+	bool got_offer = mbuf_get_left(msg->mb);
+//	log_info("mes : \n%s", msg->mb->buf);
+	if (got_offer) {
+		struct mbuf *mb;
+		mb = msg->mb;
+		sdp_decode(callf->con->sdp, mb, true);
+		const struct sa *addr = sdp_media_raddr(callf->con->media);
+		const struct sa *sb = sdp_media_laddr(callf->con->media);
+		log_info("laddr :%s", inet_ntoa(sb->u.in.sin_addr));
+//		const struct sdp_format *sp;
+//		sp = sdp_media_lformat(callf->con->media, 0);
+		//TODO
+		asip_stream_t *str = callf->st;
+		info_rtp_t *rs = malloc(sizeof(info_rtp_t));
+		rs->addr = malloc(sizeof(struct sa));
+		memcpy(rs->addr, addr, sizeof(struct sa));
+		rs->stream = str;
+		pthread_create(&(str->ptx), NULL, call_sendRtp, rs);
+	} else {
+		log_info("accept call");
+		asip_stream_t *str = callf->st;
+		str->run = true;
+		info_rtp_t *rs = malloc(sizeof(info_rtp_t));
+		rs->stream = str;
+		rs->addr = callf->addr;
+		pthread_create(&(str->ptx), NULL, call_sendRtp, rs);
 	}
-	log_info("Connect Rtp port is %d", ntohs(addr->u.in.sin_port));
-	asip_stream_t *str = callf->st;
-	info_rtp_t *rs = malloc(sizeof(info_rtp_t));
-	rs->addr = malloc(sizeof(struct sa));
-	memcpy(rs->addr, addr, sizeof(struct sa));
-	rs->stream = str;
-	pthread_create(&(str->ptx), NULL, call_sendRtp, rs);
-//	free(callf);
+	free(callf);
 }
 uint32_t time_milisecond() {
 	struct timeval time;
@@ -198,6 +177,8 @@ void* call_sendRtp(void *arg) {
 	static int s16 = sizeof(int16_t);
 	asip_stream_t *str = rs->stream;
 	struct sa *sa = rs->addr;
+	log_info("port is %d\n", ntohs(sa->u.in.sin_port));
+	log_info("dia chi :%s", inet_ntoa(sa->u.in.sin_addr));
 	struct mbuf *buf = mbuf_alloc(lg + RTP_HEADER_SIZE);
 	buf->size = lg + RTP_HEADER_SIZE;
 	buf->end = lg + RTP_HEADER_SIZE;
@@ -206,7 +187,7 @@ void* call_sendRtp(void *arg) {
 	int err;
 	int8_t *point = (int8_t*) &(buf->buf[RTP_HEADER_SIZE]);
 	buf->pos = RTP_HEADER_SIZE;
-	log_info("send size is %d", buf->size);
+	log_info("send size is %ld", buf->size);
 	uint32_t ts = time_milisecond();
 	while (str->run) {
 		err = pa_simple_read(str->in, din, read, NULL);
@@ -218,7 +199,7 @@ void* call_sendRtp(void *arg) {
 			buf->pos = RTP_HEADER_SIZE;
 			ts = ts & 0xffffffff;
 			rtp_send(str->rtp, sa, false, false, 0, ts, buf);
-			ts = ts + 20;
+			ts = ts + 160;
 		}
 	}
 	free(sa);

@@ -17,3 +17,11 @@ char* asip_convert(char *lp) {
 	}
 	return res;
 }
+void help_memcpy(void **dst, const void *src, size_t lg) {
+	*dst = malloc(lg);
+	char *cp = *dst;
+	char *st = src;
+	for (int i = 0; i < lg; i++) {
+		cp[i] = st[i];
+	}
+}

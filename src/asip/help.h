@@ -24,6 +24,7 @@ typedef struct info_rtp {
 typedef struct call_info {
 	asip_conf_t *con; /// poniter to save configtion to close socket
 	asip_stream_t *st; /// pointer to audio stream
+	struct sa *addr; /// address
 } call_info;
 /**
  *  struct for handle for accept a call
@@ -33,6 +34,12 @@ typedef struct call_accept {
 	asip_user *ua; /// user
 	asip_conf_t *con; /// program configtion
 } call_accept;
+
+typedef struct sip_state {
+	int call;
+	int login;
+	int iscoming ;
+} sip_state;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,9 +47,6 @@ extern "C" {
 char* asip_convert(char *lp);
 int auth_handler(char **username, char **password, const char *realm, void *arg);
 uint32_t time_milisecond();
-
-
-
 
 // test call function
 void* call_sendRtp(void *arg);
@@ -61,10 +65,9 @@ int sipCall_offer(struct mbuf **descp, const struct sip_msg *msg, void *arg);
 void sipCall_entab(const struct sip_msg *msg, void *arg);
 void call_rtpHandle(const struct sa *src, const struct rtp_header *hdr,
 		struct mbuf *mb, void *arg);
-void* call_sendRtp(void *arg) ;
+void* call_sendRtp(void *arg);
 
-
-
+void help_memcpy(void **dst, const void *src, size_t lg);
 #ifdef __cplusplus
 }
 #endif

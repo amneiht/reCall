@@ -8,6 +8,8 @@
 #include <alog.h>
 #include "help.h"
 #include <stdlib.h>
+
+extern sip_state state;
 int auth_handler(char **username, char **password, const char *realm, void *arg) {
 	asip_user *ua = arg;
 	int err = 0;
@@ -20,14 +22,25 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg) {
 		log_err("register error: %s\n", strerror(err));
 	else
 		re_printf("register reply: %u %r\n", msg->scode, &msg->reason);
-	call_accept *call = arg;
-	if (call->con->sock == NULL) {
-		err = asip_initSession(call->con, call->ua);
-		if (err) {
-			log_err("can not init sipsession socket");
+	if (msg->scode == 200) {
+		state.login = 1;
+		call_accept *call = arg;
+		if (call->con->sock == NULL) {
+			err = asip_initSession(call->con, call->ua);
+			if (err) {
+				log_err("can not init sipsession socket");
+			} else {
+				log_info("init session sock");
+			}
+		} else {
+			log_info("sock not null");
 		}
+
+		free(call);
+	} else {
+		state.login = 0;
 	}
-	free(call);
+
 }
 int asip_login(asip_conf_t *con, asip_user *ua) {
 	int err;
